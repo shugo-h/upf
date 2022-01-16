@@ -59,38 +59,30 @@ void UpfDispatcher(const Event *event) {
         status = PfcpParseMessage(pfcpMessage, recvBufBlk);
         UTLT_Assert(status == STATUS_OK, goto freeBuf, "PfcpParseMessage error");
 
+        PfcpNode *gnode;
         if (pfcpMessage->header.seidP) {
-
             // if SEID presence
             if (!pfcpMessage->header.seid) {
                 // without SEID
-                if (pfcpMessage->header.type == PFCP_SESSION_ESTABLISHMENT_REQUEST) {
-                    session = UpfSessionAddByMessage(pfcpMessage);
-                } else {
-                    UTLT_Assert(0, goto freeBuf,
-                                "no SEID but not SESSION ESTABLISHMENT");
-                }
+                UTLT_Assert(pfcpMessage->header.type == PFCP_SESSION_ESTABLISHMENT_REQUEST,
+                    goto freeBuf, "no SEID but not SESSION ESTABLISHMENT");
+                session = UpfSessionAddByMessage(pfcpMessage);
             } else {
                 // with SEID
                 session = UpfSessionFindBySeid(pfcpMessage->header.seid);
             }
 
-            UTLT_Level_Assert(LOG_WARNING, session, UpfSendNoSessionRsp(pfcpMessage, upf),
-                        "do not find / establish session");
-
-            if (pfcpMessage->header.type != PFCP_SESSION_REPORT_RESPONSE && session) {
+            UTLT_Level_Assert(LOG_WARNING, session, goto freeBuf, "do not find / establish session");
+            if (pfcpMessage->header.type != PFCP_SESSION_REPORT_RESPONSE)
                 session->pfcpNode = upf;
-            } else {
-                goto freeBuf;
-            }
 
-            status = PfcpXactReceive(session->pfcpNode,
-                                     &pfcpMessage->header, &xact);
-            UTLT_Assert(status == STATUS_OK, goto freeBuf, "");
+            gnode = session->pfcpNode;
         } else {
-            status = PfcpXactReceive(upf, &pfcpMessage->header, &xact);
-            UTLT_Assert(status == STATUS_OK, goto freeBuf, "");
+            gnode = upf;
         }
+
+        status = PfcpXactReceive(gnode, &pfcpMessage->header, &xact);
+        UTLT_Assert(status == STATUS_OK, goto freeBuf, "");
 
         switch (pfcpMessage->header.type) {
         case PFCP_HEARTBEAT_REQUEST:
