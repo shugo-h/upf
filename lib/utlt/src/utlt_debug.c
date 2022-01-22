@@ -9,12 +9,12 @@
 
 #include "logger.h"
 #include "utlt_lib.h"
+#include "utlt_list.h"
 
 // TODO : Need to use buffer written by ourself
 #define MAX_SIZE_OF_BUFFER 32768
 
 unsigned int reportCaller = 0;
-pthread_mutex_t UTLT_logBufLock;
 static int logLevel = LOG_INFO;
 
 static void __lowerString(char *output, const char *input) {
@@ -70,17 +70,47 @@ Status UTLT_SetReportCaller(unsigned int flag) {
     return STATUS_OK;
 }
 
+typedef struct {
+    ListHead node;
+    pthread_t tid;
+    char buffer[MAX_SIZE_OF_BUFFER];
+} logBufNode;
+
+static ListHead logBufList;
+
 int UTLT_LogPrint(int level, const char *filename, const int line, 
                   const char *funcname, const char *fmt, ...) {
-    char buffer[MAX_SIZE_OF_BUFFER];
 
     unsigned int cnt, vspCnt;
-    Status status = STATUS_OK;
     if (level > logLevel) return status;
+
+    // initialize logBufList if it is not initialized yet
+    if (!ListNext(&logBufList)) ListHeadInit(&logBufList);
+
+    // find the log buffer for the caller thread
+    pthread_t tid = pthread_self();
+    char *buffer;
+    logBufList *it, *next;
+    ListForEachSafe(it, next, &logBufList) {
+        if (it->tid == tid) {
+            buffer = it->buffer;
+            break;
+        }
+    }
+
+    // allocate a new buffer to the caller thread if the buffer is not found
+    if (!buffer) {
+        logBufNode *node = malloc(sizeof(logBufNode));
+        if (!node) return STATUS_ERROR;
+        node->tid = tid;
+        ListInsert(node, &logBufList);
+        buffer = node->buffer;
+    }
+
+    size_t buflen = sizeof((logBufNode *)NULL)->buffer);
     va_list vl;
     va_start(vl, fmt);
-    pthread_mutex_lock(&UTLT_logBufLock);
-    vspCnt = vsnprintf(buffer, sizeof(buffer), fmt, vl);
+    vspCnt = vsnprintf(buffer, buflen, fmt, vl);
     if (vspCnt < 0) {
         fprintf(stderr, "vsnprintf in UTLT_LogPrint error : %s\n", strerror(errno));
         status = STATUS_ERROR;
@@ -91,11 +121,10 @@ int UTLT_LogPrint(int level, const char *filename, const int line,
     if (status != STATUS_OK) goto unlockReturn;
 
     if (reportCaller == REPORTCALLER_TRUE) {
-        cnt = snprintf(buffer + vspCnt, sizeof(buffer) - vspCnt, " (%s:%d %s)", filename, line, funcname);
+        cnt = snprintf(buffer + vspCnt, buflen - vspCnt, " (%s:%d %s)", filename, line, funcname);
         if (cnt < 0) {
             fprintf(stderr, "sprintf in UTLT_LogPrint error : %s\n", strerror(errno));
-            status = STATUS_ERROR;
-            goto unlockReturn;
+            return STATUS_ERROR;
         }
     }
 
@@ -123,12 +152,10 @@ int UTLT_LogPrint(int level, const char *filename, const int line,
             break;
         default :
             fprintf(stderr, "The log level %d is out of range.\n", level);
-            status = STATUS_ERROR;
+            return STATUS_ERROR;
     }
 
-unlockReturn:
-    pthread_mutex_unlock(&UTLT_logBufLock);
-    return status;
+    return STATUS_OK;
 }
 
 const char *UTLT_StrStatus(Status status) {
