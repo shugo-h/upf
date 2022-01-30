@@ -109,8 +109,7 @@ typedef struct {
     Hash            *sessionHash;
     // Save buffer packet here
     Hash            *bufPacketHash;
-    // Use spin lock to protect data write
-    pthread_spinlock_t buffLock;
+
     // TODO: read from config
     // no reason, just want to bigger than /tmp/free5gc_unix_sock
 #define MAX_SOCK_PATH_LEN 64
@@ -175,6 +174,8 @@ typedef struct _UpfBufPacket {
     const UpfSession *sessionPtr;
     uint16_t        pdrId;
     Bufblk          *packetBuffer;
+
+    pthread_spinlock_t lock;
 } UpfBufPakcet;
 
 typedef struct {

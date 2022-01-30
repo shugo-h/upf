@@ -1,5 +1,6 @@
 #include "up_match.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -391,8 +392,15 @@ static int PacketInBufferHandle(uint8_t *pkt, uint16_t pktlen, UPDK_PDR *matched
 
         // protect data write with spinlock
         // instead of protect code block with mutex
-        UTLT_Assert(!pthread_spin_lock(&Self()->buffLock), return -1,
-                    "spin lock buffLock error");
+        switch (pthread_spin_trylock(packetStorage->lock)) {
+            case 0:
+                break;
+            case EBUSY:
+                UTLT_Debug("spin lock is held by another thread");
+                return 0;
+            default:
+                UTLT_Assert(0, return -1, "spin lock error");
+        }
 
         utime_t now = TimeNow();
         if (packetStorage->packetBuffer) {
@@ -422,37 +430,28 @@ static int PacketInBufferHandle(uint8_t *pkt, uint16_t pktlen, UPDK_PDR *matched
 
         if (BufIsNotEnough(packetStorage->packetBuffer, 1, sizeof(pktlen) + pktlen)) {
             UTLT_Level_Assert(LOG_DEBUG,
-                              BufblkResize(packetStorage->packetBuffer, 1, packetStorage->packetBuffer->size + sizeof(pktlen) + pktlen) == STATUS_OK,
-                              goto unlockErrorReturn, "block add behind old buffer error");
+                BufblkResize(packetStorage->packetBuffer, 1, packetStorage->packetBuffer->size + sizeof(pktlen) + pktlen) == STATUS_OK,
+                goto unlockErrorReturn, "block add behind old buffer error");
         }
 
         // if packetBuffer not null, just add packet followed
         BufblkBytes(packetStorage->packetBuffer, (const char *)&pktlen, sizeof(pktlen));
         BufblkBytes(packetStorage->packetBuffer, (const char *)pkt, pktlen);
 
-        while (pthread_spin_unlock(&Self()->buffLock)) {
-            // if unlock failed, keep trying
-            UTLT_Error("spin unlock error");
-        }
+        UTLT_Assert(pthread_spin_unlock(&packetStorage->lock) == 0, , "spin unlock error");
 
         if (action & PFCP_FAR_APPLY_ACTION_NOCP) {
             // If NOCP, Send event to notify SMF
             uint64_t seid = ((UpfSession*) packetStorage->sessionPtr)->upfSeid;
             UTLT_Debug("buffer NOCP to SMF: SEID: %u, PDRID: %u", seid, pdrId);
-            status = EventSend(Self()->eventQ, UPF_EVENT_SESSION_REPORT, 2,
-                            seid, pdrId);
-            UTLT_Assert(status == STATUS_OK, ,
-                        "DL data message event send to N4 failed");
+            status = EventSend(Self()->eventQ, UPF_EVENT_SESSION_REPORT, 2, seid, pdrId);
+            UTLT_Assert(status == STATUS_OK, , "DL data message event send to N4 failed");
         }
 
         return 1;
 
     unlockErrorReturn:
-        while (pthread_spin_unlock(&Self()->buffLock)) {
-            // if unlock failed, keep trying
-            UTLT_Error("spin unlock error");
-        }
-
+        UTLT_Assert(pthread_spin_unlock(&packetStorage->lock) == 0, , "spin unlock error");
         return -1;
     }
 

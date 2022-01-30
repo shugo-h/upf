@@ -148,9 +148,6 @@ Status UpfContextInit() {
     self.sessionHash = HashMake();
     self.bufPacketHash = HashMake();
     self.pktbufHoldTime = DEFAULT_PKTBUF_HOLDING_TIME;
-    // spin lock protect write data instead of mutex protect code block
-    int ret = pthread_spin_init(&self.buffLock, PTHREAD_PROCESS_PRIVATE);
-    UTLT_Assert(ret == 0, , "buffLock cannot create: %s", strerror(ret));
 
     upfContextInitialized = 1;
 
@@ -170,8 +167,6 @@ Status UpfContextTerminate() {
 
     Status status = STATUS_OK;
 
-    int ret = pthread_spin_destroy(&self.buffLock);
-    UTLT_Assert(ret == 0, , "buffLock cannot destroy: %s", strerror(ret));
     UTLT_Assert(self.bufPacketHash, , "Buffer Hash Table missing?!");
     HashDestroy(self.bufPacketHash);
 
@@ -464,6 +459,8 @@ UpfBufPacket *UpfBufPacketAdd(const UpfSession * const session,
 
     UpfBufPacket *newBufPacket = UTLT_Malloc(sizeof(UpfBufPacket));
     UTLT_Assert(newBufPacket, return NULL, "Allocate new slot error");
+    int ret = pthread_spin_init(&newBufPacket->lock);
+    UTLT_Assert(ret == 0, , "spin lock cannot create: %s", strerror(ret));
     newBufPacket->sessionPtr = session;
     newBufPacket->pdrId = pdrId;
     newBufPacket->packetBuffer = NULL;
@@ -491,6 +488,8 @@ Status UpfBufPacketRemove(UpfBufPacket *bufPacket) {
     HashSet(self.bufPacketHash, &bufPacket->pdrId,
             sizeof(uint16_t), NULL);
     //ListRemove(&Self()->bufPacketList, bufPacket);
+    int ret = pthread_spin_destroy(&bufPacket->lock);
+    UTLT_Assert(ret == 0, , "spin lock cannot destroy: %s", strerror(ret));
     status = UTLT_Free(bufPacket);
     UTLT_Assert(status == STATUS_OK, return STATUS_ERROR,
                 "bufPacket free error");

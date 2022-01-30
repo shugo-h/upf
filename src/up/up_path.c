@@ -189,10 +189,8 @@ Status UpSendPacketByPdrFar(UpfPDR *pdr, UpfFAR *far, Sock *sock) {
 
         uint16_t pdrId = pdr->pdrId;
         UpfBufPacket *bufStorage = UpfBufPacketFindByPdrId(pdrId);
+        UTLT_Assert(pthread_spin_lock(&bufStorage->lock) == 0, return STATUS_ERROR, "spin lock error");
         if (bufStorage->packetBuffer) {
-            UTLT_Assert(!pthread_spin_lock(&Self()->buffLock),
-                        return STATUS_ERROR, "spin lock buffLock error");
-
             Bufblk *sendBuf = BufblkAlloc(1, GTPV1_HEADER_LEN);
             UTLT_Assert(sendBuf, status = STATUS_ERROR; goto FREEBUFBLK, "create buffer error");
             Bufblk *pktBuf = bufStorage->packetBuffer;
@@ -218,17 +216,12 @@ Status UpSendPacketByPdrFar(UpfPDR *pdr, UpfFAR *far, Sock *sock) {
                 bufStorage->packetBuffer = NULL;
             else
                 UTLT_Error("Free packet buffer failed");
-
-            while (pthread_spin_unlock(&Self()->buffLock)) {
-                // if unlock failed, keep trying
-                UTLT_Error("spin unlock error");
-            }
         } else {
             UTLT_Debug("bufStorage is NULL");
         }
-        UTLT_Assert(status == STATUS_OK, return status,
-                    "Free packet buffer failed");
-        bufStorage->packetBuffer = NULL;
+
+        UTLT_Assert(status == STATUS_OK, , "Free packet buffer failed");
+        UTLT_Assert(pthread_spin_unlock(&bufStorage->lock) == 0, , "spin unlock error");
     } else {
         UTLT_Warning("outer header creatation not implement: "
                      "GTP-IPV6, IPV4, IPV6");
