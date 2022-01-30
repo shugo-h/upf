@@ -231,13 +231,16 @@ RuleNodeFree(URR);
 #define UPF_RULE_ID(__ruleName) __ruleName ## Id
 
 // Do the thread safe to upper layer function
-#define RuleNodeHashSet(__ruleType, __id, __ptr) HashSet(__ruleType##Hash, &(__id), sizeof(__id), (__ptr))
-#define RuleNodeHashGet(__ruleType, __id) HashGet(__ruleType##Hash, &(__id), sizeof(__id))
+#define RuleNodeHashSet(__ruleType, __key, __ptr) HashSet(__ruleType##Hash, (__key), sizeof(__key), (__ptr))
+#define RuleNodeHashGet(__ruleType, __key) HashGet(__ruleType##Hash, (__key), sizeof(__key))
 
 #define RuleFindByID(__ruleType, __ruleName, __keyType) \
-int Upf##__ruleType##FindByID(__keyType id, void *ruleBuf) { \
+int Upf##__ruleType##FindByID(uint64_t upfSeid, __keyType id, void *ruleBuf) { \
+    uint8_t key[sizeof(uint64_t) + sizeof(__keyType)]; \
+    *(uint64_t *)key = upfSeid; \
+    *(__keyType *)(key + sizeof(uint64_t)) = id; \
     __ruleType##_Thread_Safe( \
-        Upf##__ruleType##Node *node = RuleNodeHashGet(__ruleType, id); \
+        Upf##__ruleType##Node *node = RuleNodeHashGet(__ruleType, key); \
     ); \
     if (!node) return -1; \
     memcpy(ruleBuf, &node->__ruleName, sizeof(Upf##__ruleType)); \
@@ -252,10 +255,13 @@ RuleFindByID(BAR, bar, uint32_t);
 RuleFindByID(URR, urr, uint32_t);
 */
 
-Status HowToHandleThisPacket(uint32_t farID, uint8_t *action) {
+Status HowToHandleThisPacket(uint64_t upfSeid, uint32_t farID, uint8_t *action) {
     Status status = STATUS_OK;
+    uint8_t key[sizeof(uint64_t) + sizeof(uint32_t)];
+    *(uint64_t *)key = upfSeid;
+    *(uint32_t *)(key + sizeof(uint64_t)) = farID;
     FAR_Thread_Safe(
-        UpfFARNode *node = RuleNodeHashGet(FAR, farID);
+        UpfFARNode *node = RuleNodeHashGet(FAR, key);
         if (!node)
             status = STATUS_ERROR;
         else
@@ -266,10 +272,15 @@ Status HowToHandleThisPacket(uint32_t farID, uint8_t *action) {
 
 #define RuleDump(__ruleType, __ruleName, __keyType) \
 void Upf##__ruleType##Dump() { \
+    uint8_t *key; \
+    uint64_t seid; \
+    __keyType id; \
     __ruleType##_Thread_Safe( \
         for (HashIndex *hi = HashFirst(__ruleType ## Hash); hi; hi = HashNext(hi)) { \
-            const __keyType *key = HashThisKey(hi); \
-            UTLT_Info(#__ruleType" ID[%u] does exist", *key); \
+            key = HashThisKey(hi); \
+            seid = *(uint64_t *)key; \
+            id = *(__keyType *)(key + sizeof(uint64_t)); \
+            UTLT_Info(#__ruleType" ID[%u] does exist in session %lu", id, seid); \
         } \
      ); \
 }
@@ -292,8 +303,11 @@ UpfPDRNode *UpfPDRRegisterToSession(UpfSession *sess, UpfPDR *rule) {
     UTLT_Assert(MatchRuleCompile(rule, newMatchRule) == STATUS_OK, goto FREEMATCHRULENODE,
         "MatchRuleCompile failed");
 
+    uint8_t key[sizeof(uint64_t) + sizeof(uint16_t)];
+    *(uint64_t *)key = sess->upfSeid;
+    *(uint16_t *)(key + sizeof(uint64_t)) = rule->pdrId;
     PDR_Thread_Safe(
-        UpfPDRNode *ruleNode = RuleNodeHashGet(PDR, rule->pdrId);
+        UpfPDRNode *ruleNode = RuleNodeHashGet(PDR, key);
         if (!ruleNode) {
             ruleNode = UpfPDRNodeAlloc();
             UTLT_Assert(ruleNode, goto FREEMATCHRULENODE, "UpfPDENodeAlloc failed");
@@ -306,7 +320,7 @@ UpfPDRNode *UpfPDRRegisterToSession(UpfSession *sess, UpfPDR *rule) {
         memcpy(&ruleNode->pdr, rule, sizeof(UpfPDR));
         ruleNode->matchRule = newMatchRule;
         newMatchRule->pdr = &ruleNode->pdr;
-        RuleNodeHashSet(PDR, ruleNode->pdr.pdrId, ruleNode);
+        RuleNodeHashSet(PDR, key, ruleNode);
     );
 
     MatchRuleRegister(newMatchRule);
@@ -323,15 +337,18 @@ FREEMATCHRULENODE:
 Upf##__ruleType##Node *Upf##__ruleType##RegisterToSession(UpfSession *sess, Upf##__ruleType *rule) { \
     UTLT_Assert(sess && rule, return NULL, "Session or Upf"#__ruleType" should not be NULL"); \
     UTLT_Assert(rule->flags.UPF_RULE_ID(__ruleName), return NULL, #__ruleType" ID should be set"); \
+    uint8_t key[sizeof(uint64_t) + sizeof(rule->UPF_RULE_ID(__ruleName))]; \
+    *(uint64_t *)key = sess->upfSeid; \
+    *(typeof(rule->UPF_RULE_ID(__ruleName)) *)(key + sizeof(uint64_t)) = rule->UPF_RULE_ID(__ruleName); \
     __ruleType##_Thread_Safe( \
-        Upf##__ruleType##Node *ruleNode = RuleNodeHashGet(__ruleType, rule->UPF_RULE_ID(__ruleName)); \
+        Upf##__ruleType##Node *ruleNode = RuleNodeHashGet(__ruleType, key); \
         if (!ruleNode) { \
             ruleNode = Upf##__ruleType##NodeAlloc(); \
             UTLT_Assert(ruleNode, return NULL, "Upf"#__ruleType"NodeAlloc failed"); \
             ListInsert(ruleNode, &sess->__ruleName##List); \
         } \
         memcpy(&ruleNode->__ruleName, rule, sizeof(Upf##__ruleType)); \
-        RuleNodeHashSet(__ruleType, ruleNode->__ruleName.UPF_RULE_ID(__ruleName), ruleNode); \
+        RuleNodeHashSet(__ruleType, key, ruleNode); \
     ); \
     return ruleNode; \
 }
@@ -345,7 +362,10 @@ RuleRegisterToSession(URR, urr);
 
 // Do the thread safe to upper layer function
 #define RuleDeletionFromSession(__ruleType, __ruleName, __sessPtr, __nodePtr) do { \
-    RuleNodeHashSet(__ruleType, (__nodePtr)->__ruleName.UPF_RULE_ID(__ruleName), NULL); \
+    uint8_t key[sizeof(uint64_t) + sezeof((__nodePtr)->__ruleName.UPF_RULE_ID(__ruleName))]; \
+    *(uint64_t *)key = (__sessPtr)->upfSeid; \
+    *(typeof((__nodePtr)->__ruleName.UPF_RULE_ID(__ruleName)) *)(key + sizeof(uint64_t)) = (__nodePtr)->__ruleName.UPF_RULE_ID(__ruleName); \
+    RuleNodeHashSet(__ruleType, key, NULL); \
     ListRemove(__nodePtr); \
 } while (0)
 
@@ -369,9 +389,12 @@ static void UpfPDRDeregisterToSessionByNode(UpfSession *sess, UpfPDRNode *ruleNo
 Status UpfPDRDeregisterToSessionByID(UpfSession *sess, uint16_t id) {
     UTLT_Assert(sess, return STATUS_ERROR, "Session should not be NULL");
 
+    uint8_t key[sizeof(uint64_t) + sizeof(uint16_t)];
+    *(uint64_t *)key = sess->upfSeid;
+    *(uint16_t *)(key + sizeof(uint64_t)) = id;
     PDR_Thread_Safe(
-        UpfPDRNode *ruleNode = RuleNodeHashGet(PDR, id);
-        UTLT_Assert(ruleNode, return STATUS_ERROR, "PDR ID[%u] does NOT exist", id);
+        UpfPDRNode *ruleNode = RuleNodeHashGet(PDR, key);
+        UTLT_Assert(ruleNode, return STATUS_ERROR, "PDR ID[%u] does NOT exist in session %lu", id, sess->upfSeid);
 
         UpfPDRDeregisterToSessionByNodeNoSafe(sess, ruleNode);
     );
@@ -382,9 +405,12 @@ Status UpfPDRDeregisterToSessionByID(UpfSession *sess, uint16_t id) {
 #define RuleDeregisterToSessionByID(__ruleType, __ruleName, __keyType) \
 Status Upf##__ruleType##DeregisterToSessionByID(UpfSession *sess, __keyType id) { \
     UTLT_Assert(sess, return STATUS_ERROR, "Session should not be NULL"); \
+    uint8_t key[sizeof(uint64_t) + sizeof(__keyType)]; \
+    *(uint64_t *)key = sess->upfSeid; \
+    *(__keyType *)(key + sizeof(uint64_t)) = id; \
     __ruleType##_Thread_Safe( \
-        Upf##__ruleType##Node *ruleNode = RuleNodeHashGet(__ruleType, id); \
-        UTLT_Assert(ruleNode, return STATUS_ERROR, #__ruleType" ID[%u] does NOT exist", id); \
+        Upf##__ruleType##Node *ruleNode = RuleNodeHashGet(__ruleType, key); \
+        UTLT_Assert(ruleNode, return STATUS_ERROR, #__ruleType" ID[%u] does NOT exist in session %lu", id, sess->upfSeid); \
         RuleDeletionFromSession(__ruleType, __ruleName, sess, ruleNode); \
     ); \
     Upf##__ruleType##NodeFree(ruleNode); \

@@ -379,13 +379,14 @@ static int PacketInGTPUHandle(uint8_t *pkt, uint16_t pktlen, uint16_t hdrlen, ui
 static int PacketInBufferHandle(uint8_t *pkt, uint16_t pktlen, UPDK_PDR *matchedPDR) {
     Status status;
     uint8_t action;
-    uint32_t farId = ((UPDK_PDR *) matchedPDR)->farId;
+    uint64_t seid = ((UPDK_PDR *)matchedPDR)->seid;
+    uint32_t farId = ((UPDK_PDR *)matchedPDR)->farId;
     
-    UTLT_Assert(HowToHandleThisPacket(farId, &action) == STATUS_OK, return -1,
+    UTLT_Assert(HowToHandleThisPacket(seid, farId, &action) == STATUS_OK, return -1,
         "FAR[%u] does not existed", farId);
 
     if (action & PFCP_FAR_APPLY_ACTION_BUFF) {
-        uint32_t pdrId = ((UPDK_PDR *) matchedPDR)->pdrId;
+        uint32_t pdrId = ((UPDK_PDR *)matchedPDR)->pdrId;
         UpfBufPacket *packetStorage = UpfBufPacketFindByPdrId(pdrId);
         UTLT_Assert(packetStorage, return -1, "Cannot find matching PDR ID buffer slot");
 

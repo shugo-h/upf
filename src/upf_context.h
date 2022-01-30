@@ -231,15 +231,15 @@ void UpfQERNodeFree(UpfQERNode *node);
 void UpfBARNodeFree(UpfBARNode *node);
 void UpfURRNodeFree(UpfURRNode *node);
 
-int UpfPDRFindByID(uint16_t id, void *ruleBuf);
-int UpfFARFindByID(uint32_t id, void *ruleBuf);
-int UpfQERFindByID(uint32_t id, void *ruleBuf);
+int UpfPDRFindByID(uint64_t upfSeid, uint16_t id, void *ruleBuf);
+int UpfFARFindByID(uint64_t upfSeid, uint32_t id, void *ruleBuf);
+int UpfQERFindByID(uint64_t upfSeid, uint32_t id, void *ruleBuf);
 /*
 int UpfBARFindByID(uint32_t id, void *ruleBuf);
 int UpfURRFindByID(uint32_t id, void *ruleBuf);
 */
 
-Status HowToHandleThisPacket(uint32_t farID, uint8_t *action);
+Status HowToHandleThisPacket(uint64_t upfSeid, uint32_t farID, uint8_t *action);
 
 void UpfPDRDump();
 void UpfFARDump();

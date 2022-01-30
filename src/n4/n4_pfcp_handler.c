@@ -235,7 +235,8 @@ Status UpfN4HandleCreatePdr(UpfSession *session, CreatePDR *createPdr) {
     memset(&upfPdr, 0, sizeof(UpfPDR));
 
     uint16_t pdrID = ntohs(*((uint16_t*) createPdr->pDRID.value));
-    UTLT_Assert(UpfPDRFindByID(pdrID, &upfPdr), return STATUS_ERROR, "PDR ID[%u] does exist in UPF Context", pdrID);
+    UTLT_Assert(UpfPDRFindByID(session->upfSeid, pdrID, &upfPdr),
+        return STATUS_ERROR, "PDR ID[%u] does exist in session %lu", pdrID, session->upfSeid);
 
     UTLT_Assert(_ConvertCreatePDRTlvToRule(&upfPdr, createPdr) == STATUS_OK,
         return STATUS_ERROR, "Convert PDR TLV To Rule is failed");
@@ -243,6 +244,9 @@ Status UpfN4HandleCreatePdr(UpfSession *session, CreatePDR *createPdr) {
     // Using UPDK API
     UTLT_Assert(Gtpv1TunnelCreatePDR(&upfPdr) == 0, return STATUS_ERROR,
         "Gtpv1TunnelCreatePDR failed");
+
+    upfPdr.flags.seid = 1;
+    upfPdr.seid = session->upfSeid;
 
     // Register PDR to Session
     UTLT_Assert(UpfPDRRegisterToSession(session, &upfPdr),
@@ -356,7 +360,8 @@ Status UpfN4HandleCreateFar(UpfSession *session, CreateFAR *createFar) {
     memset(&upfFar, 0, sizeof(UpfFAR));
 
     uint32_t farID = ntohl(*((uint32_t*) createFar->fARID.value));
-    UTLT_Assert(UpfFARFindByID(farID, &upfFar), return STATUS_ERROR, "FAR ID[%u] does exist in UPF Context", farID);
+    UTLT_Assert(UpfFARFindByID(session->upfSeid, farID, &upfFar),
+        return STATUS_ERROR, "FAR ID[%u] does exist in session %lu", farID, session->upfSeid);
 
     UTLT_Assert(_ConvertCreateFARTlvToRule(&upfFar, createFar) == STATUS_OK,
         return STATUS_ERROR, "Convert FAR TLV To Rule is failed");
@@ -484,7 +489,8 @@ Status UpfN4HandleCreateQer(UpfSession *session, CreateQER *createQer) {
     memset(&upfQer, 0, sizeof(UpfQER));
 
     uint32_t qerID = ntohl(*((uint32_t *) createQer->qERID.value));
-    UTLT_Assert(UpfQERFindByID(qerID, &upfQer), return STATUS_ERROR, "QER ID[%u] does exist in UPF Context", qerID);
+    UTLT_Assert(UpfQERFindByID(session->upfSeid, qerID, &upfQer),
+        return STATUS_ERROR, "QER ID[%u] does exist in session %lu", qerID, session->upfSeid);
 
     UTLT_Assert(_ConvertCreateQERTlvToRule(&upfQer, createQer) == STATUS_OK,
         return STATUS_ERROR, "Convert Create QER TLV To Rule is failed");
@@ -706,7 +712,8 @@ Status UpfN4HandleUpdatePdr(UpfSession *session, UpdatePDR *updatePdr) {
     memset(&upfPdr, 0, sizeof(UpfPDR));
 
     uint16_t pdrID = ntohs(*((uint16_t *)updatePdr->pDRID.value));
-    UTLT_Assert(!UpfPDRFindByID(pdrID, &upfPdr), return STATUS_ERROR, "PDR ID[%u] does NOT exist in UPF Context", pdrID);
+    UTLT_Assert(!UpfPDRFindByID(session->upfSeid, pdrID, &upfPdr),
+        return STATUS_ERROR, "PDR ID[%u] does NOT exist in session %lu", pdrID, session->upfSeid);
 
     UTLT_Assert(_ConvertUpdatePDRTlvToRule(&upfPdr, updatePdr) == STATUS_OK,
         return STATUS_ERROR, "Convert PDR TLV To Rule is failed");
@@ -822,14 +829,15 @@ Status UpfN4HandleUpdateFar(UpfSession *session, UpdateFAR *updateFar) {
     memset(&upfFar, 0, sizeof(UpfFAR));
 
     uint32_t farID = ntohl(*((uint32_t *)updateFar->fARID.value));
-    UTLT_Assert(!UpfFARFindByID(farID, &upfFar), return STATUS_ERROR, "FAR ID[%u] does NOT exist in UPF Context", farID);
+    UTLT_Assert(!UpfFARFindByID(session->upfSeid, farID, &upfFar),
+        return STATUS_ERROR, "FAR ID[%u] does NOT exist in session %lu", farID, session->upfSeid);
 
     UTLT_Assert(_ConvertUpdateFARTlvToRule(&upfFar, updateFar) == STATUS_OK,
         return STATUS_ERROR, "Convert FAR TLV To Rule is failed");
 
     // Get old apply action to check its changing
     uint8_t oldAction;
-    UTLT_Assert(HowToHandleThisPacket(farID, &oldAction) == STATUS_OK, return STATUS_ERROR, "Can NOT find origin FAR action");
+    UTLT_Assert(HowToHandleThisPacket(session->upfSeid, farID, &oldAction) == STATUS_OK, return STATUS_ERROR, "Can NOT find origin FAR action");
 
     // Using UPDK API
     UTLT_Assert(Gtpv1TunnelUpdateFAR(&upfFar) == 0, return STATUS_ERROR,
@@ -981,7 +989,8 @@ Status UpfN4HandleUpdateQer(UpfSession *session, UpdateQER *updateQer) {
     memset(&upfQer, 0, sizeof(UpfQER));
 
     uint32_t qerID = ntohl(*((uint32_t *)updateQer->qERID.value));
-    UTLT_Assert(!UpfQERFindByID(qerID, &upfQer), return STATUS_ERROR, "QER ID[%u] does NOT exist in UPF Context", qerID);
+    UTLT_Assert(!UpfQERFindByID(session->upfSeid, qerID, &upfQer),
+        return STATUS_ERROR, "QER ID[%u] does NOT exist in session %lu", qerID, session->upfSeid);
 
     UTLT_Assert(_ConvertUpdateQERTlvToRule(&upfQer, updateQer) == STATUS_OK,
         return STATUS_ERROR, "Convert Update QER TLV To Rule is failed");
@@ -1016,7 +1025,8 @@ Status UpfN4HandleRemovePdr(UpfSession *session, uint16_t nPDRID) {
     UpfPDR upfPdr;
     memset(&upfPdr, 0, sizeof(UpfPDR));
 
-    UTLT_Assert(!UpfPDRFindByID(pdrID, &upfPdr), return STATUS_ERROR, "PDR ID[%u] does NOT exist in UPF Context", pdrID);    
+    UTLT_Assert(!UpfPDRFindByID(session->upfSeid, pdrID, &upfPdr),
+        return STATUS_ERROR, "PDR ID[%u] does NOT exist in session %lu", pdrID, session->upfSeid);    
 
     UTLT_Assert(_ConvertRemovePDRTlvToRule(&upfPdr, nPDRID) == STATUS_OK,
             return STATUS_ERROR, "Convert PDR TLV To Rule is failed");
@@ -1055,7 +1065,8 @@ Status UpfN4HandleRemoveFar(UpfSession *session, uint32_t nFARID) {
     UpfFAR upfFar;
     memset(&upfFar, 0, sizeof(UpfFAR));
 
-    UTLT_Assert(!UpfFARFindByID(farID, &upfFar), return STATUS_ERROR, "FAR ID[%u] does NOT exist in UPF Context", farID);
+    UTLT_Assert(!UpfFARFindByID(session->upfSeid, farID, &upfFar),
+        return STATUS_ERROR, "FAR ID[%u] does NOT exist in session %lu", farID, session->upfSeid);
 
     UTLT_Assert(_ConvertRemoveFARTlvToRule(&upfFar, nFARID) == STATUS_OK,
         return STATUS_ERROR, "Convert FAR TLV To Rule is failed");
@@ -1089,7 +1100,8 @@ Status UpfN4HandleRemoveQer(UpfSession *session, uint32_t nQERID) {
     UpfQER upfQer;
     memset(&upfQer, 0, sizeof(UpfQER));
 
-    UTLT_Assert(!UpfQERFindByID(qerID, &upfQer), return STATUS_ERROR, "QER ID[%u] does NOT exist in UPF Context", qerID);
+    UTLT_Assert(!UpfQERFindByID(session->upfSeid, qerID, &upfQer),
+        return STATUS_ERROR, "QER ID[%u] does NOT exist in session", qerID, session->upfSeid);
 
     UTLT_Assert(_ConvertRemoveQERTlvToRule(&upfQer, nQERID) == STATUS_OK,
         return STATUS_ERROR, "Convert Remove QER TLV To Rule is failed");
